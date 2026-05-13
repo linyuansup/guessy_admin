@@ -1,0 +1,923 @@
+import 'dart:convert';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+
+void main() {
+  runApp(const MainApp());
+}
+
+class MainApp extends StatelessWidget {
+  const MainApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return const MaterialApp(home: ServerConfigPage());
+  }
+}
+
+class ServerConfigPage extends StatefulWidget {
+  const ServerConfigPage({super.key});
+
+  @override
+  State<ServerConfigPage> createState() => _ServerConfigPageState();
+}
+
+class _ServerConfigPageState extends State<ServerConfigPage> {
+  final _formKey = GlobalKey<FormState>();
+  final _hostController = TextEditingController(text: 'localhost');
+  final _portController = TextEditingController(text: '5198');
+
+  @override
+  void dispose() {
+    _hostController.dispose();
+    _portController.dispose();
+    super.dispose();
+  }
+
+  void _onConfirm() {
+    if (_formKey.currentState!.validate()) {
+      final host = _hostController.text.trim();
+      final port = _portController.text.trim();
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (context) => HomePage(host: host, port: port),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('服务器配置'), centerTitle: true),
+      body: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.dns, size: 80, color: Colors.blue),
+              const SizedBox(height: 32),
+              TextFormField(
+                controller: _hostController,
+                decoration: const InputDecoration(
+                  labelText: '服务器地址',
+                  hintText: '例如: 192.168.1.100',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.computer),
+                ),
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return '请输入服务器地址';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _portController,
+                decoration: const InputDecoration(
+                  labelText: '端口号',
+                  hintText: '例如: 8080',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.numbers),
+                ),
+                keyboardType: TextInputType.number,
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return '请输入端口号';
+                  }
+                  final port = int.tryParse(value.trim());
+                  if (port == null || port < 1 || port > 65535) {
+                    return '请输入有效的端口号 (1-65535)';
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 32),
+              SizedBox(
+                width: double.infinity,
+                height: 48,
+                child: ElevatedButton(
+                  onPressed: _onConfirm,
+                  child: const Text('确定'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class HomePage extends StatefulWidget {
+  final String host;
+  final String port;
+
+  const HomePage({
+    super.key,
+    required this.host,
+    required this.port,
+  });
+
+  @override
+  State<HomePage> createState() => _HomePageState();
+}
+
+class _HomePageState extends State<HomePage> {
+  int _currentIndex = 0;
+
+  List<Widget> get _pages => [
+    QuestionsPage(host: widget.host, port: widget.port),
+    RoundsPage(host: widget.host, port: widget.port),
+    PlayersPage(host: widget.host, port: widget.port),
+    SettingsPage(host: widget.host, port: widget.port),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: IndexedStack(index: _currentIndex, children: _pages),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _currentIndex,
+        onDestinationSelected: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.help_outline),
+            selectedIcon: Icon(Icons.help),
+            label: '问题',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.sync_outlined),
+            selectedIcon: Icon(Icons.sync),
+            label: '回合',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.people_outline),
+            selectedIcon: Icon(Icons.people),
+            label: '玩家',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.settings_outlined),
+            selectedIcon: Icon(Icons.settings),
+            label: '设置',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class QuestionsPage extends StatefulWidget {
+  final String host;
+  final String port;
+
+  const QuestionsPage({super.key, required this.host, required this.port});
+
+  @override
+  State<QuestionsPage> createState() => _QuestionsPageState();
+}
+
+class _QuestionsPageState extends State<QuestionsPage> {
+  List<dynamic> _questions = [];
+  bool _isLoading = false;
+  String? _error;
+  int _currentPage = 1;
+  final int _pageSize = 10;
+  bool _hasMore = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadQuestions();
+  }
+
+  Future<void> _loadQuestions({bool refresh = false}) async {
+    if (_isLoading) return;
+
+    if (refresh) {
+      _currentPage = 1;
+      _hasMore = true;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    try {
+      final response = await http.get(
+        Uri.parse('http://${widget.host}:${widget.port}/api/getProblem?page=$_currentPage&pageSize=$_pageSize'),
+      );
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = jsonDecode(response.body);
+        setState(() {
+          if (refresh || _currentPage == 1) {
+            _questions = data;
+          } else {
+            _questions.addAll(data);
+          }
+          _hasMore = data.length >= _pageSize;
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _error = '加载失败: ${response.statusCode}';
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = '请求失败: $e';
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _refresh() async {
+    await _loadQuestions(refresh: true);
+  }
+
+  void _loadMore() {
+    if (!_isLoading && _hasMore) {
+      _currentPage++;
+      _loadQuestions();
+    }
+  }
+
+  void _showAddQuestionDialog() {
+    final contentController = TextEditingController();
+    final hintsController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('添加问题'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: contentController,
+                decoration: const InputDecoration(
+                  labelText: '问题内容',
+                  border: OutlineInputBorder(),
+                ),
+                maxLines: 3,
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: hintsController,
+                decoration: const InputDecoration(
+                  labelText: '提示（用逗号分隔）',
+                  hintText: '提示1, 提示2, 提示3',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final content = contentController.text.trim();
+              if (content.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('请输入问题内容')),
+                );
+                return;
+              }
+
+              final hints = hintsController.text
+                  .split(',')
+                  .map((h) => h.trim())
+                  .where((h) => h.isNotEmpty)
+                  .toList();
+
+              final question = {
+                'content': content,
+                'hints': hints.map((h) => {'value': h}).toList(),
+              };
+
+              try {
+                final response = await http.post(
+                  Uri.parse('http://${widget.host}:${widget.port}/api/updateProblem'),
+                  headers: {'Content-Type': 'application/json'},
+                  body: jsonEncode(question),
+                );
+
+                if (!context.mounted) return;
+
+                if (response.statusCode == 200) {
+                  Navigator.pop(context);
+                  _refresh();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('添加成功')),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('添加失败: ${response.statusCode}')),
+                  );
+                }
+              } catch (e) {
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('请求失败: $e')),
+                );
+              }
+            },
+            child: const Text('添加'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showEditQuestionDialog(Map<String, dynamic> question) {
+    final contentController = TextEditingController(text: question['content'] ?? '');
+    final hintsController = TextEditingController(
+      text: (question['hints'] as List? ?? [])
+          .map((h) => h['value'] ?? '')
+          .join(', '),
+    );
+    bool used = question['useState'] != 1;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('编辑问题'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: contentController,
+                  decoration: const InputDecoration(
+                    labelText: '问题内容',
+                    border: OutlineInputBorder(),
+                  ),
+                  maxLines: 3,
+                ),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: hintsController,
+                  decoration: const InputDecoration(
+                    labelText: '提示（用逗号分隔）',
+                    hintText: '提示1, 提示2, 提示3',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SwitchListTile(
+                  title: const Text('已使用'),
+                  value: used,
+                  onChanged: (value) {
+                    setDialogState(() {
+                      used = value;
+                    });
+                  },
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                final content = contentController.text.trim();
+                if (content.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('请输入问题内容')),
+                  );
+                  return;
+                }
+
+                final hints = hintsController.text
+                    .split(',')
+                    .map((h) => h.trim())
+                    .where((h) => h.isNotEmpty)
+                    .toList();
+
+                final requestBody = {
+                  'content': content,
+                  'hints': hints.map((h) => {'value': h}).toList(),
+                  'used': used,
+                };
+
+                try {
+                  final response = await http.post(
+                    Uri.parse('http://${widget.host}:${widget.port}/api/updateProblem'),
+                    headers: {'Content-Type': 'application/json'},
+                    body: jsonEncode(requestBody),
+                  );
+
+                  if (!context.mounted) return;
+
+                  if (response.statusCode == 200) {
+                    Navigator.pop(context);
+                    _refresh();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('编辑成功')),
+                    );
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('编辑失败: ${response.statusCode}')),
+                    );
+                  }
+                } catch (e) {
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('请求失败: $e')),
+                  );
+                }
+              },
+              child: const Text('保存'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('问题'),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _refresh,
+            tooltip: '刷新',
+          ),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: _refresh,
+        child: _buildBody(),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _showAddQuestionDialog,
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_isLoading && _questions.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_error != null && _questions.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(_error!, style: const TextStyle(color: Colors.red)),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _refresh,
+              child: const Text('重试'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_questions.isEmpty) {
+      return const Center(child: Text('暂无数据'));
+    }
+
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        if (notification is ScrollEndNotification &&
+            notification.metrics.extentAfter < 200) {
+          _loadMore();
+        }
+        return false;
+      },
+      child: ListView.builder(
+        padding: const EdgeInsets.only(bottom: 80),
+        itemCount: _questions.length + (_hasMore ? 1 : 0),
+        itemBuilder: (context, index) {
+          if (index == _questions.length) {
+            return const Center(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: CircularProgressIndicator(),
+              ),
+            );
+          }
+
+          final question = _questions[index];
+          final useState = question['useState'] ?? 0;
+          final content = question['content'] ?? '';
+          final hints = question['hints'] as List? ?? [];
+
+          return Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: ListTile(
+              title: Text(content),
+              trailing: IconButton(
+                icon: const Icon(Icons.edit),
+                onPressed: () => _showEditQuestionDialog(question),
+              ),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: useState == 1 ? Colors.green : Colors.grey,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          useState == 1 ? '未使用' : '已使用',
+                          style: const TextStyle(color: Colors.white, fontSize: 12),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text('${hints.length} 个提示', style: TextStyle(color: Colors.grey[600])),
+                    ],
+                  ),
+                  if (hints.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 4,
+                      runSpacing: 4,
+                      children: hints.map<Widget>((hint) {
+                        return Chip(
+                          label: Text(hint['value'] ?? '', style: const TextStyle(fontSize: 12)),
+                          padding: EdgeInsets.zero,
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class RoundsPage extends StatefulWidget {
+  final String host;
+  final String port;
+
+  const RoundsPage({super.key, required this.host, required this.port});
+
+  @override
+  State<RoundsPage> createState() => _RoundsPageState();
+}
+
+class _RoundsPageState extends State<RoundsPage> {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('回合'), centerTitle: true),
+      body: const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.sync, size: 80, color: Colors.green),
+            SizedBox(height: 16),
+            Text('回合页面', style: TextStyle(fontSize: 24)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class PlayersPage extends StatefulWidget {
+  final String host;
+  final String port;
+
+  const PlayersPage({super.key, required this.host, required this.port});
+
+  @override
+  State<PlayersPage> createState() => _PlayersPageState();
+}
+
+class _PlayersPageState extends State<PlayersPage> {
+  List<dynamic> _players = [];
+  bool _isLoading = false;
+  String? _error;
+  int _currentPage = 1;
+  final int _pageSize = 10;
+  bool _hasMore = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPlayers();
+  }
+
+  Future<void> _loadPlayers({bool refresh = false}) async {
+    if (_isLoading) return;
+
+    if (refresh) {
+      _currentPage = 1;
+      _hasMore = true;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    try {
+      final response = await http.get(
+        Uri.parse('http://${widget.host}:${widget.port}/api/getPlayers?page=$_currentPage&pageSize=$_pageSize'),
+      );
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = jsonDecode(response.body);
+        setState(() {
+          if (refresh || _currentPage == 1) {
+            _players = data;
+          } else {
+            _players.addAll(data);
+          }
+          _hasMore = data.length >= _pageSize;
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _error = '加载失败: ${response.statusCode}';
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = '请求失败: $e';
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _refresh() async {
+    await _loadPlayers(refresh: true);
+  }
+
+  void _loadMore() {
+    if (!_isLoading && _hasMore) {
+      _currentPage++;
+      _loadPlayers();
+    }
+  }
+
+  Future<void> _deletePlayer(String braceletId) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('确认删除'),
+        content: Text('确定要删除手环 $braceletId 吗？'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('删除'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    try {
+      final response = await http.get(
+        Uri.parse('http://${widget.host}:${widget.port}/api/deletePlayer?braceletId=$braceletId'),
+      );
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        _refresh();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('删除成功')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('删除失败: ${response.statusCode}')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('请求失败: $e')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('玩家'),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _refresh,
+            tooltip: '刷新',
+          ),
+        ],
+      ),
+      body: RefreshIndicator(
+        onRefresh: _refresh,
+        child: _buildBody(),
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    if (_isLoading && _players.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (_error != null && _players.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(_error!, style: const TextStyle(color: Colors.red)),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _refresh,
+              child: const Text('重试'),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (_players.isEmpty) {
+      return const Center(child: Text('暂无数据'));
+    }
+
+    return NotificationListener<ScrollNotification>(
+      onNotification: (notification) {
+        if (notification is ScrollEndNotification &&
+            notification.metrics.extentAfter < 200) {
+          _loadMore();
+        }
+        return false;
+      },
+      child: ListView.builder(
+        padding: const EdgeInsets.only(bottom: 80),
+        itemCount: _players.length + (_hasMore ? 1 : 0),
+        itemBuilder: (context, index) {
+          if (index == _players.length) {
+            return const Center(
+              child: Padding(
+                padding: EdgeInsets.all(16),
+                child: CircularProgressIndicator(),
+              ),
+            );
+          }
+
+          final player = _players[index];
+          final braceletId = player['braceletId']?['value'] ?? '';
+          final deviceId = player['deviceId']?['value'] ?? '';
+          final score = player['score']?['value'] ?? 0;
+
+          return Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: ListTile(
+              leading: CircleAvatar(
+                backgroundColor: Colors.blue,
+                child: Text(
+                  (index + 1).toString(),
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ),
+              title: Text('手环: $braceletId'),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('设备: $deviceId'),
+                  const SizedBox(height: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.green,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      '积分: $score',
+                      style: const TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                  ),
+                ],
+              ),
+              trailing: IconButton(
+                icon: const Icon(Icons.delete, color: Colors.red),
+                onPressed: () => _deletePlayer(braceletId),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class SettingsPage extends StatefulWidget {
+  final String host;
+  final String port;
+
+  const SettingsPage({super.key, required this.host, required this.port});
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  bool _isLoading = false;
+
+  Future<void> _stop() async {
+    setState(() => _isLoading = true);
+
+    try {
+      await http.get(
+        Uri.parse('http://${widget.host}:${widget.port}/api/stop'),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('已发送停止请求')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('请求失败: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('设置'), centerTitle: true),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.settings, size: 80, color: Colors.orange),
+            const SizedBox(height: 32),
+            SizedBox(
+              width: 200,
+              height: 48,
+              child: ElevatedButton(
+                onPressed: _isLoading ? null : _stop,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                ),
+                child: _isLoading
+                    ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Text('强制结束'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
