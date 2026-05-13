@@ -868,7 +868,24 @@ class SettingsPage extends StatefulWidget {
 }
 
 class _SettingsPageState extends State<SettingsPage> {
+  final _displayTopCountController = TextEditingController(text: '5');
+  final _durationController = TextEditingController(text: '60');
+  final _selectQuestionCountController = TextEditingController(text: '10');
+
+  List<Map<String, int>> _rankRewards = [
+    {'rank': 1, 'playerScore': 10, 'drawerScore': 5},
+    {'rank': 2, 'playerScore': 8, 'drawerScore': 4},
+    {'rank': 3, 'playerScore': 5, 'drawerScore': 3},
+  ];
   bool _isLoading = false;
+
+  @override
+  void dispose() {
+    _displayTopCountController.dispose();
+    _durationController.dispose();
+    _selectQuestionCountController.dispose();
+    super.dispose();
+  }
 
   Future<void> _stop() async {
     setState(() => _isLoading = true);
@@ -891,29 +908,253 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
+  void _addRankReward() {
+    final lastRank = _rankRewards.isEmpty ? 0 : _rankRewards.last['rank']!;
+    setState(() {
+      _rankRewards.add({
+        'rank': lastRank + 1,
+        'playerScore': 5,
+        'drawerScore': 3,
+      });
+    });
+  }
+
+  void _removeRankReward(int index) {
+    setState(() {
+      _rankRewards.removeAt(index);
+    });
+  }
+
+  void _updateRankReward(int index, String field, int value) {
+    setState(() {
+      _rankRewards[index][field] = value;
+    });
+  }
+
+  Future<void> _saveConfig() async {
+    final displayTopCount = int.tryParse(_displayTopCountController.text);
+    final duration = int.tryParse(_durationController.text);
+    final selectQuestionCount = int.tryParse(_selectQuestionCountController.text);
+
+    if (displayTopCount == null || displayTopCount < 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请输入有效的展示前几名')),
+      );
+      return;
+    }
+
+    if (duration == null || duration < 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请输入有效的游戏时间')),
+      );
+      return;
+    }
+
+    if (selectQuestionCount == null || selectQuestionCount < 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('请输入有效的题目数量')),
+      );
+      return;
+    }
+
+    setState(() => _isLoading = true);
+
+    try {
+      final response = await http.post(
+        Uri.parse('http://${widget.host}:${widget.port}/api/config'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'displayTopCount': displayTopCount,
+          'duration': duration,
+          'selectQuestionCount': selectQuestionCount,
+          'rankRewards': _rankRewards.map((reward) => {
+            'rank': reward['rank'],
+            'playerScore': reward['playerScore'],
+            'drawerScore': reward['drawerScore'],
+          }).toList(),
+        }),
+      );
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('保存成功')),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('保存失败: ${response.statusCode}')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('请求失败: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('设置'), centerTitle: true),
-      body: Center(
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
         child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Icon(Icons.settings, size: 80, color: Colors.orange),
-            const SizedBox(height: 32),
-            SizedBox(
-              width: 200,
-              height: 48,
-              child: ElevatedButton(
-                onPressed: _isLoading ? null : _stop,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text('游戏配置', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _displayTopCountController,
+                      decoration: const InputDecoration(
+                        labelText: '展示前几名',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.leaderboard),
+                      ),
+                      keyboardType: TextInputType.number,
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _durationController,
+                      decoration: const InputDecoration(
+                        labelText: '游戏时间（秒）',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.timer),
+                      ),
+                      keyboardType: TextInputType.number,
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _selectQuestionCountController,
+                      decoration: const InputDecoration(
+                        labelText: '可选题目数',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.quiz),
+                      ),
+                      keyboardType: TextInputType.number,
+                    ),
+                    const SizedBox(height: 16),
+                    FilledButton(
+                      onPressed: _isLoading ? null : _saveConfig,
+                      child: _isLoading
+                          ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : const Text('保存配置'),
+                    ),
+                  ],
                 ),
-                child: _isLoading
-                    ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Text('强制结束'),
               ),
+            ),
+            const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('排名奖励规则', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                        IconButton(
+                          icon: const Icon(Icons.add),
+                          onPressed: _addRankReward,
+                          tooltip: '添加奖励规则',
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    ..._rankRewards.asMap().entries.map((entry) {
+                      final index = entry.key;
+                      final reward = entry.value;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: TextFormField(
+                                initialValue: reward['rank'].toString(),
+                                decoration: const InputDecoration(
+                                  labelText: '排名',
+                                  border: OutlineInputBorder(),
+                                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                ),
+                                keyboardType: TextInputType.number,
+                                onChanged: (value) {
+                                  final rank = int.tryParse(value);
+                                  if (rank != null) {
+                                    _updateRankReward(index, 'rank', rank);
+                                  }
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: TextFormField(
+                                initialValue: reward['playerScore'].toString(),
+                                decoration: const InputDecoration(
+                                  labelText: '玩家得分',
+                                  border: OutlineInputBorder(),
+                                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                ),
+                                keyboardType: TextInputType.number,
+                                onChanged: (value) {
+                                  final score = int.tryParse(value);
+                                  if (score != null) {
+                                    _updateRankReward(index, 'playerScore', score);
+                                  }
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: TextFormField(
+                                initialValue: reward['drawerScore'].toString(),
+                                decoration: const InputDecoration(
+                                  labelText: '画师得分',
+                                  border: OutlineInputBorder(),
+                                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                ),
+                                keyboardType: TextInputType.number,
+                                onChanged: (value) {
+                                  final score = int.tryParse(value);
+                                  if (score != null) {
+                                    _updateRankReward(index, 'drawerScore', score);
+                                  }
+                                },
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            IconButton(
+                              icon: const Icon(Icons.delete, color: Colors.red),
+                              onPressed: () => _removeRankReward(index),
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 32),
+            ElevatedButton(
+              onPressed: _isLoading ? null : _stop,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+              child: _isLoading
+                  ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Text('强制结束游戏'),
             ),
           ],
         ),
